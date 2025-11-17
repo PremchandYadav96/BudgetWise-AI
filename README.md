@@ -2,6 +2,8 @@
 
 BudgetWise AI is a comprehensive, single-file Streamlit application designed to be your intelligent financial companion. It helps you track expenses, manage budgets, and gain insights into your spending habits through a clean, professional, and user-friendly dark theme interface. The application leverages AI for expense forecasting and personalized financial advice.
 
+Website link: https://budgetwise-ai-nt86qhxk7e.streamlit.app/
+
 ## Features
 
 - **Database**: Utilizes SQLite for robust and persistent data storage.
