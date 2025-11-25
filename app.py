@@ -1,17 +1,6 @@
-# app.py
 """
 BudgetWise AI — Single-file Streamlit application
 Run with: streamlit run app.py
-
-Features:
-- SQLite backend (budget_app.db)
-- Authentication with SHA256 password hashing
-- Full Expense & Budget CRUD with image uploads
-- Recurring expenses processing
-- AI predictions using models/best_finance_model.pkl
-- Gemini Pro API integration for AI financial advice
-- Interactive Plotly charts & data export
-- Clean, stable, and professional dark theme UI
 """
 
 import streamlit as st
@@ -22,8 +11,8 @@ import numpy as np
 from datetime import datetime, timedelta, date
 import joblib
 import plotly.express as px
+import plotly.graph_objects as go  # Added for better custom charts
 import hashlib
-import io
 from typing import Optional, Tuple
 import google.generativeai as genai
 
@@ -176,6 +165,37 @@ input, textarea, select {
 """
 
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+# ------------------------
+# HELPER: GRAPH STYLING
+# ------------------------
+def style_plotly_chart(fig):
+    """Applies a consistent dark theme to any Plotly figure."""
+    fig.update_layout(
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#c9d1d9', family="Inter, sans-serif"),
+        margin=dict(t=30, l=10, r=10, b=10),
+        xaxis=dict(
+            showgrid=True, 
+            gridcolor='#30363d', 
+            zeroline=False,
+            showline=True,
+            linecolor='#30363d'
+        ),
+        yaxis=dict(
+            showgrid=True, 
+            gridcolor='#30363d', 
+            zeroline=False,
+            showline=True,
+            linecolor='#30363d'
+        ),
+        legend=dict(
+            bgcolor='rgba(0,0,0,0)',
+            font=dict(size=11)
+        )
+    )
+    return fig
 
 # ------------------------
 # DATABASE & CORE LOGIC
@@ -369,8 +389,10 @@ def dashboard_page():
         st.info("Welcome! Add your first expense to see your dashboard.")
         return
 
+    # Basic stats
     this_month_start = date.today().replace(day=1)
-    df_this_month = df[df['date'] >= this_month_start]
+    df['date_obj'] = pd.to_datetime(df['date']) # Ensure datetime type
+    df_this_month = df[df['date_obj'].dt.date >= this_month_start]
     
     c1, c2, c3, c4 = st.columns(4)
     with c1: st.markdown(f"<div class='metric-card'><h3>₹{df['amount'].sum():,.2f}</h3><p class='small-muted'>Total Spent</p></div>", unsafe_allow_html=True)
@@ -380,19 +402,63 @@ def dashboard_page():
     
     st.markdown("---")
     col1, col2 = st.columns(2)
+    
+    # --- CHART 1: DONUT CHART (Spending by Category) ---
     with col1:
-        st.markdown("#### Spending by Category (This Month)")
-        by_cat = df_this_month.groupby('category')['amount'].sum().reset_index().sort_values('amount', ascending=False)
-        fig = px.pie(by_cat, names='category', values='amount', hole=0.4, color_discrete_sequence=px.colors.sequential.Blues_r)
-        fig.update_layout(showlegend=False, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color='#c9d1d9')
-        st.plotly_chart(fig, use_container_width=True)
+        st.markdown("#### Spending by Category")
+        if df_this_month.empty:
+            st.caption("No data for this month to display chart.")
+        else:
+            by_cat = df_this_month.groupby('category')['amount'].sum().reset_index().sort_values('amount', ascending=False)
+            
+            # Create interactive Donut Chart
+            fig_pie = go.Figure(data=[go.Pie(
+                labels=by_cat['category'],
+                values=by_cat['amount'],
+                hole=.6,
+                textinfo='label+percent',
+                textposition='outside',
+                marker=dict(colors=px.colors.sequential.Blues_r),
+                hovertemplate="<b>%{label}</b><br>₹%{value:,.2f}<extra></extra>"
+            )])
+            
+            fig_pie = style_plotly_chart(fig_pie)
+            fig_pie.update_layout(showlegend=False)
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+    # --- CHART 2: AREA CHART (Spending Trend) ---
     with col2:
-        st.markdown("#### Monthly Spending Trend")
-        df['month'] = pd.to_datetime(df['date']).dt.to_period('M').astype(str)
-        monthly_trend = df.groupby('month')['amount'].sum().reset_index()
-        fig = px.line(monthly_trend, x='month', y='amount', markers=True, color_discrete_sequence=['#58a6ff'])
-        fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color='#c9d1d9')
-        st.plotly_chart(fig, use_container_width=True)
+        st.markdown("#### Spending Trend (Last 6 Months)")
+        
+        # Get data for the last 6 months
+        six_months_ago = pd.Timestamp.now() - pd.DateOffset(months=6)
+        df_trend = df[df['date_obj'] >= six_months_ago].copy()
+        
+        if df_trend.empty:
+            st.caption("Not enough data for trend analysis.")
+        else:
+            # Group by Month and sort chronologically
+            df_trend['month_year'] = df_trend['date_obj'].dt.to_period('M')
+            monthly_trend = df_trend.groupby('month_year')['amount'].sum().reset_index()
+            monthly_trend['month_year'] = monthly_trend['month_year'].dt.to_timestamp()
+            monthly_trend = monthly_trend.sort_values('month_year')
+
+            # Create Smooth Area Chart
+            fig_trend = go.Figure()
+            fig_trend.add_trace(go.Scatter(
+                x=monthly_trend['month_year'],
+                y=monthly_trend['amount'],
+                mode='lines+markers',
+                fill='tozeroy',  # Fill area below line
+                name='Spent',
+                line=dict(color='#58a6ff', width=3, shape='spline'), # Smooth spline
+                marker=dict(size=8, color='#1f6feb', line=dict(width=2, color='white')),
+                hovertemplate="<b>%{x|%B %Y}</b><br>₹%{y:,.2f}<extra></extra>"
+            ))
+            
+            fig_trend = style_plotly_chart(fig_trend)
+            fig_trend.update_layout(xaxis_title=None, yaxis_title="Amount (₹)")
+            st.plotly_chart(fig_trend, use_container_width=True)
 
 def add_expense_page():
     st.markdown('<div class="card"><h2>➕ Add New Expense</h2></div>', unsafe_allow_html=True)
@@ -506,22 +572,82 @@ def ai_predictions_page():
         return
 
     cats = sorted(df['category'].unique().tolist())
-    category = st.selectbox("Select Category to Forecast", cats)
-    days = st.slider("Days to forecast", 7, 90, 30)
-    if st.button("Generate Forecast", use_container_width=True):
-        dates = [date.today() + timedelta(days=i) for i in range(1, days + 1)]
-        preds = [predict_amount(d, category) for d in dates]
-        pred_df = pd.DataFrame({'date': dates, 'predicted_amount': preds})
-        fig = px.line(pred_df, x='date', y='predicted_amount', title=f"Forecast for '{category}'", markers=True)
-        st.plotly_chart(fig, use_container_width=True)
+    
+    col_input, col_graph = st.columns([1, 3])
+    
+    with col_input:
+        st.markdown("#### Configuration")
+        category = st.selectbox("Select Category", cats)
+        days = st.slider("Forecast Days", 7, 90, 30)
+        generate_btn = st.button("Generate Forecast", use_container_width=True)
+
+    if generate_btn:
+        with col_graph:
+            # 1. Get Historical Data (Last 30 entries for context)
+            df['date_obj'] = pd.to_datetime(df['date'])
+            cat_history = df[df['category'] == category].sort_values('date_obj')
+            
+            # 2. Generate Future Dates & Predictions
+            future_dates = [date.today() + timedelta(days=i) for i in range(1, days + 1)]
+            preds = [predict_amount(d, category) for d in future_dates]
+            
+            # 3. Build the Visualization
+            fig = go.Figure()
+
+            # Trace 1: Historical Data (Solid Line)
+            if not cat_history.empty:
+                # Group by date to handle multiple transactions per day
+                hist_grouped = cat_history.groupby('date_obj')['amount'].sum().reset_index()
+                # Limit to recent history for clarity (last 30 entries)
+                hist_grouped = hist_grouped.tail(30)
+                
+                fig.add_trace(go.Scatter(
+                    x=hist_grouped['date_obj'], 
+                    y=hist_grouped['amount'],
+                    mode='lines+markers',
+                    name='Actual History',
+                    line=dict(color='#238636', width=3),
+                    marker=dict(size=6)
+                ))
+                
+                # Connect the last history point to the first prediction point visually
+                last_hist_date = hist_grouped['date_obj'].iloc[-1]
+                last_hist_val = hist_grouped['amount'].iloc[-1]
+                
+                # Prepend the last actual data point to predictions to close the gap
+                future_dates_plot = [last_hist_date] + future_dates
+                preds_plot = [last_hist_val] + preds
+            else:
+                future_dates_plot = future_dates
+                preds_plot = preds
+
+            # Trace 2: Prediction (Dashed Line)
+            fig.add_trace(go.Scatter(
+                x=future_dates_plot, 
+                y=preds_plot,
+                mode='lines+markers',
+                name='AI Forecast',
+                line=dict(color='#a371f7', width=3, dash='dash'), # Purple dashed line
+                marker=dict(size=6, symbol='diamond')
+            ))
+
+            fig.update_layout(
+                title=f"Spending Forecast: {category}",
+                xaxis_title="Date",
+                yaxis_title="Amount (₹)",
+                hovermode="x unified"
+            )
+            
+            fig = style_plotly_chart(fig)
+            st.plotly_chart(fig, use_container_width=True)
 
 def ai_financial_advisor_page():
     st.markdown('<div class="card"><h2>⭐ AI Financial Advisor</h2><p class="subtitle">Get personalized financial advice from Gemini Pro</p></div>', unsafe_allow_html=True)
     try:
         api_key = st.secrets["GEMINI_API_KEY"]
         genai.configure(api_key=api_key)
-        # FIXED: Use 'gemini-pro', a stable and publicly available model from your list.
-        model = genai.GenerativeModel('gemini-2.5-pro')
+        # Using a standard model name
+        model = genai.GenerativeModel('gemini-pro')
     except Exception:
         st.error("Could not configure Gemini API. Ensure `secrets.toml` has a valid GEMINI_API_KEY.")
         return
