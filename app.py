@@ -647,7 +647,7 @@ def ai_financial_advisor_page():
         api_key = st.secrets["GEMINI_API_KEY"]
         genai.configure(api_key=api_key)
         # Using a standard model name
-        model = genai.GenerativeModel('gemini-pro')
+        model = genai.GenerativeModel('gemini-2.0-flash')
     except Exception:
         st.error("Could not configure Gemini API. Ensure `secrets.toml` has a valid GEMINI_API_KEY.")
         return
